@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>wicd-webui</title>	 
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+	<link rel="stylesheet" href="{{ url_for('static',filename='css/bootstrap.min.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static',filename='css/bootstrap-theme.min.css') }}">
+	<link rel="stylesheet" href="{{ url_for('static',filename='css/bootstrap-select.min.css') }}">
+</head>
+
+<body>
+	<div class="container" style="margin-top:10px;">
+		<div class="modal fade" id="configModal" tabindex="-1" role="dialog" aria-labelledby="configModalLabel" aria-hidden="true">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<button type="button" class="close" data-dismiss="modal">
+							<span aria-hidden="true">&times;</span>
+							<span class="sr-only">Close</span>
+						</button>
+						<h4 class="modal-title" id="configModalLabel"></h4>
+					</div>
+					<form id="configModalForm">
+						<div class="modal-body" id="configModalText">
+
+							<input type="hidden" id="configModalNetworkId" name="networkid">
+							<div class="form-group">
+								<label for="configModalESSID">ESSID</label>
+								<input type="text" class="form-control" id="configModalESSID" name="wicd-essid" placeholder="Network ESSID">
+							</div>
+							<div class="form-group">
+								<label for="configModalEncryption">Encryption</label>
+								<p class="help-block" id="configModalEncryptionMethod"></p>
+								<select id="configModalEncryption" name="wicd-enctype" class="form-control selectpicker">
+									<option value="">None</option>
+									<option data-divider="true"></option>
+									<option value="wpa">WPA 1/2 (Hex [0-9/A-F])</option>
+									<option value="wpa-psk">WPA 1/2 (Passphrase)</option>
+									<option data-divider="true"></option>
+									<option value="wep-hex">WEP (Hex [0-9/A-F])</option>
+									<option value="wep-passphrase">WEP (Passphrase)</option>
+								</select>
+								<input type="password" class="form-control" id="configModalPassword" name="passkey" placeholder="Password">
+								<p class="help-block">Passphrase or hex key depending on the encryption type selected.</p>
+							</div>
+						</div>
+						<div class="modal-footer">
+							<button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+							<button type="submit" class="btn btn-primary">Save changes</button>
+						</div>
+					</form>
+				</div>
+			</div>
+		</div>
+		<div class="panel panel-default">
+			<!-- Default panel contents -->
+			<div class="panel-heading text-center"><a href="https://github.com/fopina/wicd-webui">wicd WebUI</a></div>
+			<div class="panel-body text-center" id="current_network">
+				<p></p>
+			</div>
+			<!-- Table -->
+			<div class="table-responsive">
+				<table class="table text-center" id="network-table">
+					<thead>
+						<tr>
+							<th class="text-center">ESSID</th>
+							<th class="text-center">Encryption</th>
+							<th class="text-center">Quality</th>
+							<th class="text-center"><a href="javascript:scan_networks();"><span class="glyphicon glyphicon-refresh"></span></a></th>
+						</tr>
+					</thead>
+					<tbody>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+
+	<script src="{{ url_for('static',filename='js/jquery.min.js') }}"></script>
+	<script src="{{ url_for('static',filename='js/bootstrap.min.js') }}"></script>
+	<script src="{{ url_for('static',filename='js/bootstrap-select.min.js') }}"></script>
+	<script src="{{ url_for('static',filename='js/jquery.json.min.js') }}"></script>
+	<script>
+
+	$.fn.serializeObject = function() {
+		var o = {};
+		var a = this.serializeArray();
+		$.each(a, function() {
+			if (o[this.name] !== undefined) {
+				if (!o[this.name].push) {
+					o[this.name] = [o[this.name]];
+				}
+				o[this.name].push(this.value || '');
+			} else {
+				o[this.name] = this.value || '';
+			}
+		});
+		return o;
+	};
+
+	var statusModal = (function () {
+		var mainDiv = $('<div class="modal fade" id="statusModal" tabindex="-1" role="dialog" aria-labelledby="statusModalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button><h4 class="modal-title" id="statusModalLabel"></h4></div><div class="modal-body" id="statusModalText"></div></div></div></div>')
+		var textDiv = $('#statusModalText', mainDiv);
+		var labelDiv = $('#statusModalLabel', mainDiv);
+		var closeButton = $('.close', mainDiv);
+		return {
+			show: function() {
+				textDiv.text('Processing...');
+				labelDiv.text('Please wait');
+				closeButton.hide();
+				mainDiv.modal();
+			},
+			hide: function () {
+				mainDiv.modal('hide');
+			},
+			text: function (text) {
+				textDiv.text(text);
+			},
+			label: function (text) {
+				labelDiv.text(text);
+			},
+			closeable: function() {
+				closeButton.show();
+			},
+		};
+	})();
+
+	function refresh_networks(data) {
+
+		$('#network-table>tbody').remove();
+		var tbody = $('<tbody/>');
+		var known
+		$.each( data['data'], function( key, val ) {
+			if (val["known"]) known = "<span class=\"glyphicon glyphicon-ok\">";
+			else known = "";
+			$("<tr/>", { html: "\
+				<td>" + val["essid"] + "</td>\
+				<td>" + val["encryption"] + known + "</td>\
+				<td>" + val["quality"] + "%</td>\
+				<td>\
+				<a href=\"javascript:connect_to_network(" + val["network_id"] + ");\">\
+				<span class=\"glyphicon glyphicon-log-in\">\
+				</a>\
+				&nbsp;\
+				<a href=\"javascript:configure_network(" + val["network_id"] + ");\">\
+				<span class=\"glyphicon glyphicon-cog\">\
+				</a>\
+				</td>\
+				"}).appendTo(tbody);
+		});
+		tbody.appendTo("#network-table");
+		statusModal.hide();
+	};
+
+	function list_networks() {
+		statusModal.show();
+		statusModal.text('Listing networks...')
+		$.getJSON( "list", refresh_networks );
+	};
+
+	function scan_networks() {
+		statusModal.show();
+		statusModal.text('Scanning networks...')
+		$.getJSON( "scan", refresh_networks );
+	};
+
+	function connect_to_network(network_id) {
+		statusModal.show();
+		statusModal.text('Connecting...')
+		$.getJSON( "connect/" + network_id, function(data) {
+			statusModal.label('Please wait (' + data['data'] + ')');
+			statusModal.text('Connecting to ' + data['data'] + '...');
+			watch_connection_status();
+		} );
+	};
+
+	function watch_connection_status() {
+		$.getJSON( "status", function(data) {
+			connecting = data['data'][0];
+			message = data['data'][2];
+			statusModal.text(message);
+			if (connecting) setTimeout(watch_connection_status, 1000);
+			else {
+				statusModal.closeable();
+				current_network();
+			};
+		});
+	}
+
+	function disconnect_network() {
+		statusModal.show();
+		statusModal.text('Disconnecting...')
+		$.getJSON( "disconnect", function(data) {
+			$('#current_network>p').text("Currently not connected to any network");
+			statusModal.hide();
+		} );
+	};
+
+	function current_network() {
+		$.getJSON( "current", function(data) {
+			$('#current_network>p').remove();
+			var newp = $('<p/>');
+			if ($.isEmptyObject(data['data']))
+				newp.text("Currently not connected to any network");
+			else {
+				newp.text('Connected to ')
+				newp.append($('<i/>').text('"' + data['data']['network'] + '"'));
+				newp.append(document.createTextNode(' at '));
+				newp.append($('<i/>').text(data['data']['quality'] + '%'));
+				newp.append(document.createTextNode(' (IP: '));
+					newp.append($('<i/>').text(data['data']['ip']));
+					newp.append(document.createTextNode(')'));
+					newp.append('\
+						<a href=\"javascript:disconnect_network();\">\
+						<span class=\"glyphicon glyphicon-log-out\">\
+						</a>');
+				}
+				newp.appendTo("#current_network");
+			});
+	};
+
+	function configure_network(network_id) {
+		statusModal.show();
+		statusModal.text('Listing networks...')
+		$.getJSON( "details/" + network_id, function(data) {
+			statusModal.hide();
+			var info = data['data'];
+			var modal = $('#configModal');
+			$('#configModalLabel',modal).text('Configure ' + info['bssid']);
+			$('#configModalESSID',modal).val(info['essid']);
+			$('#configModalEncryptionMethod',modal).text('Encryption is ' + info['encryption']);
+			$('#configModalNetworkId',modal).val(network_id);
+			
+			if (info['encryption'] == 'Off') {
+				$('#configModalPassword',modal).prop('disabled', true);
+				$('#configModalEncryption',modal).prop('disabled', true);
+			}
+			else {
+				$('#configModalPassword',modal).prop('disabled', false);
+				$('#configModalEncryption',modal).prop('disabled', false);
+			}
+			$('.selectpicker').selectpicker('refresh');
+
+			if (info['essid'] === '') {
+				$('#configModalESSID',modal).prop('disabled', false);
+			}
+			else {
+				$('#configModalESSID',modal).prop('disabled', true);
+			}
+			modal.modal();
+		} );
+	}
+
+	$( document ).ready(function() {
+		current_network();
+		list_networks();
+		if( /Android|webOS|iPhone|iPad|iPod|BlackBerry/i.test(navigator.userAgent) ) {
+			$('.selectpicker').selectpicker('mobile');
+		}
+		else {
+			$('.selectpicker').selectpicker();
+		}
+		$('#configModalForm').submit(function(event) {
+			event.preventDefault();
+			$.ajax({
+					type: 'POST',
+					url: 'config',
+					data: $.toJSON($(this).serializeObject()),
+					contentType: "application/json",
+					dataType: 'json'
+				});
+		});
+	});
+	</script>
+</body>
+</html>
