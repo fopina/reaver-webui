@@ -2,9 +2,12 @@
 
 from flask import Flask, render_template, jsonify, abort, request
 
+from reaver_toolkit import AiroDump
+
 import sys
 
 app = Flask(__name__)
+airodump = AiroDump()
 
 @app.route('/')
 def home():
@@ -13,27 +16,23 @@ def home():
 @app.route('/list')
 def list():
 	results = []
-	for network_id in range(wireless.GetNumberOfNetworks()):
+	for network_id in airodump.networks:
 		result = {}
-		result['encryption'] = 'Off'
-		if wireless.GetWirelessProperty(network_id, 'encryption'):
-			result['encryption'] = wireless.GetWirelessProperty(network_id, 'encryption_method')
-
+		network = airodump.networks[network_id]
+		result['encryption'] = network[1]
 		result['network_id'] = network_id
-		result['bssid'] = wireless.GetWirelessProperty(network_id, 'bssid')
-		result['channel'] = wireless.GetWirelessProperty(network_id, 'channel')
-		result['quality'] = wireless.GetWirelessProperty(network_id, 'quality')
-		result['essid'] = wireless.GetWirelessProperty(network_id, 'essid')
-
-		# check if there's key/passphrase stored (WPA1/2 and WEP only, sorry)
-		result['known'] = (wireless.GetWirelessProperty(network_id, 'key') or wireless.GetWirelessProperty(network_id, 'apsk') or wireless.GetWirelessProperty(network_id, 'passphrase') or False) and True
+		result['bssid'] = network_id
+		result['channel'] = network[0]
+		result['quality'] = network[4]
+		result['essid'] = network[5]
+		result['known'] = False
 		results.append(result)
 
 	return jsonify(data = results)
 
 @app.route('/scan')
 def scan():
-	wireless.Scan(True)
+	airodump.refresh_networks()
 	return list()
 
 @app.route('/connect/<int:network_id>')
@@ -149,8 +148,6 @@ def current():
 			result['quality'] = wireless.GetCurrentDBMStrength(iwconfig)
 
 	return jsonify(data = result)
-
-# init
 
 if __name__ == "__main__":
 	app.run(host='0.0.0.0')
